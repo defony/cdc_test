@@ -1,0 +1,71 @@
+
+
+Change Data Capture (CDC) is a technique used to track changes in a database. To implement CDC with PostgreSQL and Python, you can use logical replication or triggers. Here, I'll demonstrate a simple example using logical replication.
+
+First, ensure that logical replication is enabled in your PostgreSQL configuration (postgresql.conf):
+
+wal_level = logical
+max_replication_slots = 4
+max_wal_senders = 4
+
+Next, create a publication in PostgreSQL:
+
+CREATE PUBLICATION my_publication FOR ALL TABLES;
+
+Now, in Python, you can use the psycopg2 library to connect to PostgreSQL and listen for changes. Here is a basic example:
+
+--------
+
+COPY (
+  SELECT row_to_json(fruit_data) FROM (
+    SELECT
+      name AS fruit_name,
+      quantity
+    FROM data
+  ) fruit_data
+) TO 'a.file';
+
+-----
+
+import psycopg2
+import select
+import json
+
+# Connect to PostgreSQL DB
+conn = psycopg2.connect(
+    dbname="source_db",
+    user="postgres",
+    password="postgres",
+    host="localhost",
+    port="5432"
+)
+
+# Create a replication slot
+cur = conn.cursor()
+cur.execute("SELECT * FROM pg_create_logical_replication_slot('cdc_slot', 'pgoutput');")
+conn.commit()
+
+# Begin changes replication
+cur.execute("START_REPLICATION SLOT cdc_slot LOGICAL 0/0 (proto_version '1', publication_names 'mypub');")
+conn.commit()
+
+# Detect table changes every 5 seconds
+while True:
+    if select.select([conn], [], [], 5) == ([], [], []):
+        print("Timeout")
+    else:
+        msg = conn.recv()
+		json_data = json.loads(msg.decode('utf-8'))
+		
+		--write json data to a file
+		timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+		file_name = f"customer_cdc_{timestamp}.json"
+		
+		with open(file_name, 'w') as file:
+			json.dump(data, file, indent=4)
+        print(msg.payload)
+		
+        cur.send_feedback(flush_lsn=msg.data_start)
+		
+		
+		
